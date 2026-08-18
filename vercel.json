@@ -1,8 +1,6 @@
 {
-  "crons": [
-    {
-      "path": "/api/cron/revops",
-      "schedule": "0 */6 * * *"
-    }
-  ]
+  "crons": [{
+    "path": "/api/cron",
+    "schedule": "0 10 * * *"
+  }]
 }
