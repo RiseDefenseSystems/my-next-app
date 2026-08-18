@@ -79,7 +79,10 @@ export default function RevbotUI() {
     chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Execute RAG Query
+  // LangGraph Thread State
+  const [langgraphThreadId, setLanggraphThreadId] = useState<string | null>(null);
+
+  // Execute RAG & LangGraph Query
   const handleSendQuery = useCallback(async (queryText: string = inputQuery) => {
     if (!queryText.trim() || isQuerying) return;
 
@@ -98,6 +101,43 @@ export default function RevbotUI() {
     setIsQuerying(true);
 
     try {
+      // 1. First try LangGraph server endpoint (/api/langgraph)
+      const lgRes = await fetch('/api/langgraph', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: queryText,
+          threadId: langgraphThreadId
+        })
+      });
+
+      if (lgRes.ok) {
+        const lgData = await lgRes.json();
+        if (lgData.threadId) {
+          setLanggraphThreadId(lgData.threadId);
+        }
+
+        const topMatch = lgData.ragMatches?.[0];
+        let botText = `**LangGraph Agent Response** (Thread \`${lgData.threadId?.slice(0, 8)}...\`):\n\n`;
+
+        if (topMatch) {
+          botText += `> Context from Neon pgvector: "${topMatch.content}"\n\n`;
+        }
+        botText += `Retrieval & Graph Execution completed via **LangGraph Studio Dev Server** + **Neon Postgres**.`;
+
+        const botMessage: ChatMessage = {
+          id: crypto.randomUUID(),
+          sender: 'revbot',
+          text: botText,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          sources: lgData.ragMatches || []
+        };
+
+        setMessages((prev) => [...prev, botMessage]);
+        return;
+      }
+
+      // 2. Fallback to standard RAG query endpoint (/api/rag/query)
       const res = await fetch('/api/rag/query', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -109,7 +149,7 @@ export default function RevbotUI() {
       let botText = '';
       if (data.resultsCount > 0) {
         const topMatch = data.matches[0];
-        botText = `Based on your indexed RevOps knowledge base in **Neon Postgres**:\n\n> "${topMatch.content}"\n\nRetrieval completed via \`pgvector\` HNSW similarity search with **${(topMatch.similarity * 100).toFixed(1)}% match accuracy**.`;
+        botText = `Based on your indexed RevOps knowledge base in **Neon Postgres**:\n\n> &quot;${topMatch.content}&quot;\n\nRetrieval completed via \`pgvector\` HNSW similarity search with **${(topMatch.similarity * 100).toFixed(1)}% match accuracy**.`;
       } else {
         botText = 'I searched your Neon Postgres `pgvector` index, but did not find high-confidence matches. You can ingest more documents in the **Knowledge Ingestion** tab to expand my memory!';
       }
@@ -136,7 +176,7 @@ export default function RevbotUI() {
     } finally {
       setIsQuerying(false);
     }
-  }, [inputQuery, isQuerying]);
+  }, [inputQuery, isQuerying, langgraphThreadId]);
 
   // Execute Ingestion
   const handleIngest = async (e: React.FormEvent) => {
