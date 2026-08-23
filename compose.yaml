@@ -1,0 +1,10 @@
+services:
+  mynextapp:
+    image: mynextapp
+    build:
+      context: .next/dev/build
+      dockerfile: ./Dockerfile
+    environment:
+      NODE_ENV: production
+    ports:
+      - 3000:3000
