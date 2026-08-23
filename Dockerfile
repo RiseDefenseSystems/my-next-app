@@ -1,10 +1,19 @@
+# =============================================================
+# Base image strategy (all three stages target 0 known CVEs):
+#
+#  deps / builder  →  cgr.dev/chainguard/node:latest-dev
+#                     Wolfi Linux, rebuilt daily, CVE-patched
+#                     within hours of disclosure. Free tier.
+#
+#  runner          →  gcr.io/distroless/nodejs24-debian12:nonroot
+#                     No shell, no pkg manager, no OS utils.
+#                     Only the Node 24 runtime + nonroot user.
+# =============================================================
+
 # ─────────────────────────────────────────────
 # Stage 1: deps — install production dependencies
 # ─────────────────────────────────────────────
-# Pin to a specific digest or patch version and apply latest OS patches
-# to minimise CVE exposure in ephemeral build stages.
-FROM node:24-alpine AS deps
-RUN apk upgrade --no-cache && apk add --no-cache libc6-compat
+FROM cgr.dev/chainguard/node:latest-dev AS deps
 WORKDIR /app
 
 COPY package.json package-lock.json* ./
@@ -13,8 +22,7 @@ RUN npm ci --omit=dev
 # ─────────────────────────────────────────────
 # Stage 2: builder — compile the Next.js app
 # ─────────────────────────────────────────────
-FROM node:24-alpine AS builder
-RUN apk upgrade --no-cache
+FROM cgr.dev/chainguard/node:latest-dev AS builder
 WORKDIR /app
 
 COPY package.json package-lock.json* ./
@@ -27,15 +35,11 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 
 # ─────────────────────────────────────────────
-# Stage 3: runner — Google Distroless (no shell, no apk, no busybox)
+# Stage 3: runner — Google Distroless
 #
-# gcr.io/distroless/nodejs24-debian12:nonroot contains ONLY:
-#   • the Node.js 24 runtime
-#   • a pre-created non-root user (uid 65532, "nonroot")
-#   • no shell, no package manager, no OS utilities
-#
-# This eliminates the entire Alpine/musl/busybox/openssl CVE surface
-# that caused the 1 critical + 7 high warnings on the previous image.
+# Contains ONLY the Node 24 runtime and a pre-created nonroot
+# user (uid 65532). No shell, no apk/apt, no busybox, no openssl
+# CLI — zero OS-level attack surface in the shipped image.
 # ─────────────────────────────────────────────
 FROM gcr.io/distroless/nodejs24-debian12:nonroot AS runner
 
@@ -46,14 +50,14 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
 
-# distroless:nonroot already runs as uid 65532 — no adduser needed.
-# Copy only the self-contained standalone output from the builder stage.
+# Copy only the self-contained standalone output from the builder.
+# Next.js standalone bundles its own node_modules subset — no install needed.
 COPY --from=builder --chown=65532:65532 /app/.next/standalone ./
 COPY --from=builder --chown=65532:65532 /app/.next/static    ./.next/static
 COPY --from=builder --chown=65532:65532 /app/public          ./public
 
 EXPOSE 3000
 
-# Distroless has no shell, so CMD must be in exec form.
-# The entrypoint is the Node.js binary; we just pass the script path.
+# Exec form required — distroless has no shell to parse string commands.
+# The distroless entrypoint IS the node binary; server.js is the argument.
 CMD ["server.js"]
