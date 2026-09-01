@@ -9,13 +9,14 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@google/genai": "^2.19.0",
     "@langchain/langgraph-sdk": "^1.9.28",
     "@neondatabase/serverless": "^1.1.0",
     "@next/swc-darwin-arm64": "^16.3.0",
     "@tailwindcss/oxide-darwin-arm64": "^4.3.3",
     "dotenv": "^17.4.2",
     "lucide-react": "^1.30.0",
-    "next": "16.2.2",
+    "next": "^16.3.3",
     "react": "19.2.4",
     "react-dom": "19.2.4"
   },
