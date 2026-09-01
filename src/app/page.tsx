@@ -21,9 +21,18 @@ import {
   BrainCircuit,
   Sliders,
   ExternalLink,
-  ChevronRight
+  ChevronRight,
+  Radio,
+  Play,
+  Pause,
+  Volume2,
+  VolumeX,
+  Mic,
+  Activity,
+  FileAudio
 } from 'lucide-react';
 import type { DocumentChunkMatch } from '@/lib/rag';
+import { RDS_RTL_AUDIO_TRACKS, type AudioTrack } from '@/lib/audio';
 
 interface ChatMessage {
   id: string;
@@ -34,7 +43,15 @@ interface ChatMessage {
 }
 
 export default function RevbotUI() {
-  const [activeTab, setActiveTab] = useState<'chat' | 'ingest' | 'inspector'>('chat');
+  const [activeTab, setActiveTab] = useState<'chat' | 'ingest' | 'inspector' | 'audio'>('chat');
+  
+  // RTL Audio Tool State
+  const [selectedTrack, setSelectedTrack] = useState<AudioTrack>(RDS_RTL_AUDIO_TRACKS[0]);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [playbackSpeed, setPlaybackSpeed] = useState<number>(1.0);
+  const [isMuted, setIsMuted] = useState(false);
+  const [isIndexingAudio, setIsIndexingAudio] = useState(false);
+  const [audioIndexSuccess, setAudioIndexSuccess] = useState<string | null>(null);
   
   // Chat state
   const [inputQuery, setInputQuery] = useState('');
@@ -269,6 +286,31 @@ export default function RevbotUI() {
     };
   }, [activeTab, inspectorThreshold, inspectorQueryText]);
 
+  const handleIndexAudioToNeon = async (track: AudioTrack) => {
+    setIsIndexingAudio(true);
+    setAudioIndexSuccess(null);
+    try {
+      const res = await fetch('/api/rag/ingest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: track.title,
+          source: track.url,
+          metadata: { category: track.category, sentiment: track.sentiment, tags: track.tags },
+          content: `[RDS RTL Audio Transcript - ${track.title}]: ${track.transcript}`
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setAudioIndexSuccess(`Indexed track to Neon Postgres! Created ${data.chunksCreated} vector chunks (Doc #${data.documentId}).`);
+      }
+    } catch (err) {
+      console.error('Error indexing audio to Neon:', err);
+    } finally {
+      setIsIndexingAudio(false);
+    }
+  };
+
   const copyToClipboard = (text: string, id: string) => {
     navigator.clipboard.writeText(text);
     setCopiedId(id);
@@ -336,6 +378,18 @@ export default function RevbotUI() {
             >
               <Bot className="w-4 h-4" />
               <span>Revbot Copilot</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('audio')}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-medium text-sm transition-all ${
+                activeTab === 'audio'
+                  ? 'bg-gradient-to-r from-purple-500/20 to-sky-500/20 text-purple-300 border border-purple-500/40 shadow-lg shadow-purple-500/10'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/50'
+              }`}
+            >
+              <Radio className="w-4 h-4 text-purple-400 animate-pulse" />
+              <span>RDS RTL Audio Tool</span>
             </button>
 
             <button
@@ -836,6 +890,216 @@ export default function RevbotUI() {
                   No vector chunks matched the threshold of {(inspectorThreshold * 100).toFixed(0)}%. Try lowering the threshold or ingesting new documents.
                 </div>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* TAB 4: RDS RTL AUDIO TOOL */}
+        {activeTab === 'audio' && (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 flex-1">
+            {/* Left Panel: Active Live Audio Player & Waveform Visualizer */}
+            <div className="lg:col-span-2 flex flex-col glass-panel rounded-2xl border border-purple-500/20 p-6 gap-6">
+              
+              {/* Header */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-purple-500/20 border border-purple-500/40 flex items-center justify-center">
+                    <Radio className="w-5 h-5 text-purple-400 animate-pulse" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h2 className="text-base font-bold text-slate-100">RDS RTL Audio Intelligence Stream</h2>
+                      <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-mono text-[10px] uppercase tracking-wider font-semibold flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span> Live
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-400">Real-Time Audio Analysis & Telemetry for Revenue Operations</p>
+                  </div>
+                </div>
+
+                <a 
+                  href="https://rdsrevops.com" 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-purple-300 text-xs font-medium transition-colors self-start sm:self-auto"
+                >
+                  <Activity className="w-3.5 h-3.5" />
+                  <span>rdsrevops.com Audio Portal</span>
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+              </div>
+
+              {/* Player Deck */}
+              <div className="glass-card rounded-2xl p-6 border border-purple-500/20 flex flex-col gap-6">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <span className="text-xs font-mono text-purple-400 uppercase tracking-wide">{selectedTrack.category}</span>
+                    <h3 className="text-base font-semibold text-slate-100 mt-0.5">{selectedTrack.title}</h3>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className={`px-2.5 py-1 rounded-full text-xs font-semibold uppercase tracking-wider ${
+                      selectedTrack.sentiment === 'positive'
+                        ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-400'
+                        : 'bg-amber-500/10 border border-amber-500/30 text-amber-400'
+                    }`}>
+                      {selectedTrack.sentiment === 'positive' ? 'Positive Sentiment' : 'Action Required'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Animated Waveform Visualizer */}
+                <div className="bg-slate-950/80 rounded-xl p-4 border border-slate-800 flex items-center justify-between gap-1.5 h-24 overflow-hidden">
+                  {[40, 65, 25, 80, 50, 95, 30, 75, 45, 88, 60, 100, 70, 45, 90, 35, 80, 55, 68, 42, 85, 30, 60, 45].map((height, i) => (
+                    <div
+                      key={i}
+                      style={{
+                        height: isPlaying ? `${Math.max(15, (height * (0.6 + Math.sin(i + Date.now() / 300) * 0.4)))}%` : `${height * 0.4}%`,
+                        transition: 'height 0.15s ease'
+                      }}
+                      className={`w-full rounded-full ${
+                        isPlaying 
+                          ? i % 2 === 0 ? 'bg-gradient-to-t from-purple-500 to-sky-400 shadow-sm shadow-purple-500/50' : 'bg-gradient-to-t from-sky-500 to-emerald-400'
+                          : 'bg-slate-700'
+                      }`}
+                    />
+                  ))}
+                </div>
+
+                {/* Audio Controls */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => setIsPlaying(!isPlaying)}
+                      className="w-12 h-12 rounded-xl bg-gradient-to-r from-purple-500 to-sky-500 hover:from-purple-400 hover:to-sky-400 text-white flex items-center justify-center shadow-lg shadow-purple-500/25 transition-all"
+                    >
+                      {isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5 ml-0.5" />}
+                    </button>
+
+                    <button
+                      onClick={() => setIsMuted(!isMuted)}
+                      className="w-9 h-9 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 flex items-center justify-center transition-colors"
+                    >
+                      {isMuted ? <VolumeX className="w-4 h-4 text-red-400" /> : <Volume2 className="w-4 h-4 text-slate-400" />}
+                    </button>
+
+                    <div className="text-xs font-mono text-slate-400">
+                      <span>{isPlaying ? '01:42' : '00:00'}</span> / <span>{selectedTrack.duration}</span>
+                    </div>
+                  </div>
+
+                  {/* Playback Speed Selectors */}
+                  <div className="flex items-center gap-1.5 bg-slate-900/90 rounded-xl p-1 border border-slate-800 self-start sm:self-auto">
+                    {[1.0, 1.25, 1.5, 2.0].map((speed) => (
+                      <button
+                        key={speed}
+                        onClick={() => setPlaybackSpeed(speed)}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-mono font-medium transition-colors ${
+                          playbackSpeed === speed
+                            ? 'bg-purple-500 text-white shadow-sm'
+                            : 'text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        {speed}x
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Live Transcript & Vector Sync Box */}
+              <div className="bg-slate-950/70 rounded-2xl p-5 border border-slate-800/80 flex flex-col gap-3">
+                <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                  <div className="flex items-center gap-2 text-xs font-semibold text-purple-300">
+                    <Mic className="w-4 h-4 text-purple-400" />
+                    <span>Real-Time Live Transcript</span>
+                  </div>
+
+                  <button
+                    onClick={() => handleIndexAudioToNeon(selectedTrack)}
+                    disabled={isIndexingAudio}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-purple-500/20 to-sky-500/20 hover:from-purple-500/30 hover:to-sky-500/30 border border-purple-500/40 text-purple-200 text-xs font-medium shadow-sm transition-all disabled:opacity-50"
+                  >
+                    {isIndexingAudio ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Database className="w-3.5 h-3.5 text-sky-400" />}
+                    <span>Index Transcript to Neon pgvector</span>
+                  </button>
+                </div>
+
+                <p className="text-sm text-slate-200 leading-relaxed italic bg-slate-900/50 p-4 rounded-xl border border-slate-800/50">
+                  &quot;{selectedTrack.transcript}&quot;
+                </p>
+
+                {audioIndexSuccess && (
+                  <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span>{audioIndexSuccess}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Right Panel: RTL Track Library & Audio Intelligence Metrics */}
+            <div className="flex flex-col gap-6">
+              {/* Track Selector List */}
+              <div className="glass-card rounded-2xl p-6 flex flex-col gap-4">
+                <h3 className="font-semibold text-sm text-slate-200 flex items-center gap-2">
+                  <FileAudio className="w-4 h-4 text-purple-400" />
+                  <span>RTL Audio Briefing Feeds</span>
+                </h3>
+
+                <div className="space-y-2.5">
+                  {RDS_RTL_AUDIO_TRACKS.map((track) => (
+                    <div
+                      key={track.id}
+                      onClick={() => {
+                        setSelectedTrack(track);
+                        setAudioIndexSuccess(null);
+                      }}
+                      className={`p-3.5 rounded-xl border cursor-pointer transition-all ${
+                        selectedTrack.id === track.id
+                          ? 'bg-purple-500/15 border-purple-500/50 shadow-md shadow-purple-500/10'
+                          : 'bg-slate-900/70 border-slate-800 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between text-xs mb-1">
+                        <span className="font-mono text-purple-400 text-[11px]">{track.category}</span>
+                        <span className="text-slate-400 font-mono">{track.duration}</span>
+                      </div>
+                      <p className="text-xs font-medium text-slate-200 line-clamp-1">{track.title}</p>
+                      
+                      <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+                        {track.tags.map((tag, idx) => (
+                          <span key={idx} className="px-2 py-0.5 rounded bg-slate-950 text-[10px] font-mono text-slate-400 border border-slate-800">
+                            #{tag}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* RTL Audio Intelligence Specs */}
+              <div className="glass-card rounded-2xl p-6 flex flex-col gap-3 text-xs">
+                <h4 className="font-semibold text-slate-200 flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-sky-400" />
+                  <span>RTL Audio Engine Specs</span>
+                </h4>
+
+                <div className="space-y-2 text-slate-300">
+                  <div className="flex items-center justify-between p-2 rounded-lg bg-slate-950/60 border border-slate-800">
+                    <span className="text-slate-400">Sample Rate</span>
+                    <span className="font-mono text-sky-400">48.0 kHz 24-bit</span>
+                  </div>
+                  <div className="flex items-center justify-between p-2 rounded-lg bg-slate-950/60 border border-slate-800">
+                    <span className="text-slate-400">Latency Protocol</span>
+                    <span className="font-mono text-emerald-400">RTL Stream (HLS/WebAudio)</span>
+                  </div>
+                  <div className="flex items-center justify-between p-2 rounded-lg bg-slate-950/60 border border-slate-800">
+                    <span className="text-slate-400">RAG Embedding</span>
+                    <span className="font-mono text-purple-400">Neon pgvector 1536</span>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         )}
