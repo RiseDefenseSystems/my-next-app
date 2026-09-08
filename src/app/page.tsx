@@ -592,23 +592,29 @@ Strategic Sovereign,$1500000,Custom Terms,CEO & Board,On-Premises / Sovereign Cl
           </div>
 
           {/* System Status Indicators */}
-          <div className="flex items-center gap-2 text-xs">
+          <div className="flex items-center gap-2 text-xs flex-wrap">
             <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-900/80 border border-emerald-500/30 text-emerald-400">
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-              <span className="font-mono font-medium">Neon Postgres connected</span>
+              <span className="font-mono font-medium">Neon Connected</span>
             </div>
-            <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-900/80 border border-sky-500/30 text-sky-400">
-              <Zap className="w-3.5 h-3.5" />
-              <span className="font-mono">pgvector HNSW</span>
+            <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-300 font-mono">
+              <Database className="w-3.5 h-3.5 text-amber-400" />
+              <span>Tier: Gold (pgvector)</span>
+            </div>
+            <div className="hidden md:flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-slate-800/60 border border-slate-700/60 text-slate-300 font-mono">
+              <Zap className="w-3.5 h-3.5 text-sky-400" />
+              <span>1536-D HNSW</span>
             </div>
             <a 
               href="https://rdsrevops.com" 
               target="_blank" 
               rel="noopener noreferrer"
-              className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/30 text-sky-300 transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/30 text-sky-300 transition-colors group"
+              title="Airo App Builder Portal"
             >
-              <span>rdsrevops.com</span>
-              <ExternalLink className="w-3 h-3" />
+              <span className="w-1.5 h-1.5 rounded-full bg-sky-400 group-hover:animate-ping"></span>
+              <span className="font-medium">Airo Builder: rdsrevops.com</span>
+              <ExternalLink className="w-3 h-3 text-sky-400/80" />
             </a>
           </div>
         </div>
@@ -1049,12 +1055,15 @@ Strategic Sovereign,$1500000,Custom Terms,CEO & Board,On-Premises / Sovereign Cl
                   }`}
                 >
                   <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-mono uppercase tracking-wider text-sky-400 font-bold">Stage 1</span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[10px] font-mono uppercase tracking-wider text-sky-400 font-bold">Stage 1</span>
+                      <span className="px-1.5 py-0.2 rounded text-[9px] font-mono bg-amber-900/40 text-amber-300 border border-amber-600/30">Bronze</span>
+                    </div>
                     <FileText className="w-4 h-4 text-sky-400" />
                   </div>
                   <div>
                     <h4 className="text-xs font-bold text-slate-100">Raw Unstructured Text</h4>
-                    <p className="text-[11px] text-slate-400 mt-0.5">SOPs, Playbooks & Audio</p>
+                    <p className="text-[11px] text-slate-400 mt-0.5">SOPs, Playbooks & Audio Ingress</p>
                   </div>
                   <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-900 font-mono text-[10px] text-slate-300 space-y-1 overflow-hidden h-20">
                     <div className="text-sky-300/90 truncate">&gt; RDS RevOps Deal Stage 2</div>
@@ -1063,7 +1072,7 @@ Strategic Sovereign,$1500000,Custom Terms,CEO & Board,On-Premises / Sovereign Cl
                     <div className="text-slate-500 truncate">&gt; NRR Target: 135% ARR</div>
                   </div>
                   <div className="text-[10px] font-mono text-slate-400 flex items-center justify-between border-t border-slate-900 pt-2">
-                    <span>Input: String</span>
+                    <span>Landing: Bronze Tier</span>
                     <span className="text-sky-400">Continuous</span>
                   </div>
                 </div>
@@ -1078,7 +1087,10 @@ Strategic Sovereign,$1500000,Custom Terms,CEO & Board,On-Premises / Sovereign Cl
                   }`}
                 >
                   <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-mono uppercase tracking-wider text-orange-400 font-bold">Stage 2</span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[10px] font-mono uppercase tracking-wider text-orange-400 font-bold">Stage 2</span>
+                      <span className="px-1.5 py-0.2 rounded text-[9px] font-mono bg-slate-700/60 text-slate-200 border border-slate-500/40">Silver</span>
+                    </div>
                     <Scissors className="w-4 h-4 text-orange-400" />
                   </div>
                   <div>
@@ -1100,8 +1112,8 @@ Strategic Sovereign,$1500000,Custom Terms,CEO & Board,On-Premises / Sovereign Cl
                     </div>
                   </div>
                   <div className="text-[10px] font-mono text-slate-400 flex items-center justify-between border-t border-slate-900 pt-2">
-                    <span>Window: {chunkSize}w</span>
-                    <span className="text-orange-400">{chunkOverlap}w Overlap</span>
+                    <span>Parsed: Silver Tier</span>
+                    <span className="text-orange-400">+{chunkOverlap}w Bridge</span>
                   </div>
                 </div>
 
@@ -1115,7 +1127,10 @@ Strategic Sovereign,$1500000,Custom Terms,CEO & Board,On-Premises / Sovereign Cl
                   }`}
                 >
                   <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-mono uppercase tracking-wider text-purple-400 font-bold">Stage 3</span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[10px] font-mono uppercase tracking-wider text-purple-400 font-bold">Stage 3</span>
+                      <span className="px-1.5 py-0.2 rounded text-[9px] font-mono bg-purple-900/40 text-purple-300 border border-purple-500/30">Vector</span>
+                    </div>
                     <Sparkles className="w-4 h-4 text-purple-400" />
                   </div>
                   <div>
@@ -1143,7 +1158,10 @@ Strategic Sovereign,$1500000,Custom Terms,CEO & Board,On-Premises / Sovereign Cl
                   }`}
                 >
                   <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-mono uppercase tracking-wider text-emerald-400 font-bold">Stage 4</span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[10px] font-mono uppercase tracking-wider text-emerald-400 font-bold">Stage 4</span>
+                      <span className="px-1.5 py-0.2 rounded text-[9px] font-mono bg-amber-500/20 text-amber-300 border border-amber-500/40">Gold Tier</span>
+                    </div>
                     <Database className="w-4 h-4 text-emerald-400" />
                   </div>
                   <div>
@@ -1201,14 +1219,17 @@ Strategic Sovereign,$1500000,Custom Terms,CEO & Board,On-Premises / Sovereign Cl
 
                 {/* Architecture Metric Badges */}
                 <div className="flex items-center gap-2 shrink-0 flex-wrap font-mono text-[10px]">
+                  <span className="px-2.5 py-1 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300">
+                    {digestionVisualStage === 0 ? 'Tier: Bronze (Ingress)' : digestionVisualStage === 1 ? 'Tier: Silver (Tokens)' : 'Tier: Gold (pgvector)'}
+                  </span>
                   <span className="px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-800 text-slate-300">
                     M=16 efConstruction=64
                   </span>
                   <span className="px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-800 text-orange-300">
-                    pgvector 1536
+                    pgvector 1536-D
                   </span>
                   <span className="px-2.5 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400">
-                    HTTP Pool Ready
+                    Airo Wire Ready
                   </span>
                 </div>
               </div>
