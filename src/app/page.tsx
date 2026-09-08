@@ -52,6 +52,15 @@ export default function RevbotUI() {
   const [isMuted, setIsMuted] = useState(false);
   const [isIndexingAudio, setIsIndexingAudio] = useState(false);
   const [audioIndexSuccess, setAudioIndexSuccess] = useState<string | null>(null);
+  const [waveTick, setWaveTick] = useState(0);
+
+  useEffect(() => {
+    if (!isPlaying) return;
+    const interval = setInterval(() => {
+      setWaveTick((prev) => (prev + 1) % 100);
+    }, 120);
+    return () => clearInterval(interval);
+  }, [isPlaying]);
   
   // Chat state
   const [inputQuery, setInputQuery] = useState('');
@@ -953,7 +962,7 @@ export default function RevbotUI() {
                     <div
                       key={i}
                       style={{
-                        height: isPlaying ? `${Math.max(15, (height * (0.6 + Math.sin(i + Date.now() / 300) * 0.4)))}%` : `${height * 0.4}%`,
+                        height: isPlaying ? `${Math.max(15, (height * (0.6 + Math.sin(i + waveTick * 0.4) * 0.4)))}%` : `${height * 0.4}%`,
                         transition: 'height 0.15s ease'
                       }}
                       className={`w-full rounded-full ${
