@@ -100,3 +100,50 @@ export async function querySimilarChunks(
     similarity: Number(row.similarity),
   }));
 }
+
+export interface DocumentSummary {
+  id: number;
+  title: string;
+  source: string | null;
+  metadata: Record<string, unknown>;
+  chunk_count: number;
+}
+
+/**
+ * Fetches recently ingested documents along with their chunk counts from Neon Postgres.
+ */
+export async function getDocuments(limit: number = 30): Promise<DocumentSummary[]> {
+  const sql = getDb();
+  const results = await sql`
+    SELECT 
+      d.id, 
+      d.title, 
+      d.source, 
+      d.metadata, 
+      COUNT(c.id)::int AS chunk_count
+    FROM documents d
+    LEFT JOIN document_chunks c ON d.id = c.document_id
+    GROUP BY d.id, d.title, d.source, d.metadata
+    ORDER BY d.id DESC
+    LIMIT ${limit};
+  `;
+
+  return results.map((row: Record<string, unknown>) => ({
+    id: Number(row.id),
+    title: String(row.title || 'Untitled Document'),
+    source: row.source ? String(row.source) : null,
+    metadata: (row.metadata as Record<string, unknown>) || {},
+    chunk_count: Number(row.chunk_count || 0),
+  }));
+}
+
+/**
+ * Deletes a document and its associated vector chunks from Neon Postgres.
+ */
+export async function deleteDocument(documentId: number): Promise<boolean> {
+  const sql = getDb();
+  await sql`DELETE FROM document_chunks WHERE document_id = ${documentId};`;
+  const result = await sql`DELETE FROM documents WHERE id = ${documentId} RETURNING id;`;
+  return result.length > 0;
+}
+

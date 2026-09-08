@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { 
   Bot, 
   Send, 
@@ -29,9 +29,17 @@ import {
   VolumeX,
   Mic,
   Activity,
-  FileAudio
+  FileAudio,
+  UploadCloud,
+  FileUp,
+  Eye,
+  Scissors,
+  FileCode,
+  Shield,
+  X,
+  FolderOpen
 } from 'lucide-react';
-import type { DocumentChunkMatch } from '@/lib/rag';
+import type { DocumentChunkMatch, DocumentSummary } from '@/lib/rag';
 import { RDS_RTL_AUDIO_TRACKS, type AudioTrack } from '@/lib/audio';
 
 interface ChatMessage {
@@ -84,13 +92,60 @@ export default function RevbotUI() {
   const [isQuerying, setIsQuerying] = useState(false);
   const chatBottomRef = useRef<HTMLDivElement>(null);
 
-  // Ingest Form State
+  // Ingress Studio State
+  const [ingestInputMode, setIngestInputMode] = useState<'upload' | 'manual'>('upload');
   const [ingestTitle, setIngestTitle] = useState('');
-  const [ingestSource, setIngestSource] = useState('revbot_docs.md');
-  const [ingestCategory, setIngestCategory] = useState('RevOps Standard Operating Procedures');
+  const [ingestSource, setIngestSource] = useState('');
+  const [ingestCategory, setIngestCategory] = useState('Standard Operating Procedures');
+  const [ingestSecurityLevel, setIngestSecurityLevel] = useState<'Internal' | 'Confidential' | 'SOC2 Compliant' | 'Executive Only'>('SOC2 Compliant');
+  const [ingestDepartment, setIngestDepartment] = useState('RevOps & GTM');
+  const [customTags, setCustomTags] = useState<string[]>(['RevOps', 'Postgres', 'pgvector']);
+  const [newTagInput, setNewTagInput] = useState('');
   const [ingestContent, setIngestContent] = useState('');
+  
+  // Real-Time Chunking Sliders
+  const [chunkSize, setChunkSize] = useState<number>(250);
+  const [chunkOverlap, setChunkOverlap] = useState<number>(40);
+  const [previewChunkIndex, setPreviewChunkIndex] = useState<number>(0);
+
+  // File Upload State
+  const [uploadedFiles, setUploadedFiles] = useState<Array<{ name: string; size: number; type: string }>>([]);
+  const [isDragging, setIsDragging] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Ingestion Execution & Telemetry
   const [isIngesting, setIsIngesting] = useState(false);
-  const [ingestResult, setIngestResult] = useState<{ success: boolean; documentId?: number; chunksCreated?: number } | null>(null);
+  const [ingestStage, setIngestStage] = useState<'idle' | 'parsing' | 'chunking' | 'embedding' | 'indexing' | 'complete' | 'error'>('idle');
+  const [ingestTelemetry, setIngestTelemetry] = useState<{
+    success: boolean;
+    documentId?: number;
+    title?: string;
+    chunksCreated?: number;
+    totalWords?: number;
+    averageWordsPerChunk?: number;
+    chunkSize?: number;
+    chunkOverlap?: number;
+    elapsedMs?: number;
+    sampleSnippet?: string;
+    error?: string;
+  } | null>(null);
+
+  // Ingested Catalog State
+  const [catalogDocs, setCatalogDocs] = useState<DocumentSummary[]>([]);
+  const [isLoadingCatalog, setIsLoadingCatalog] = useState(false);
+  const [deletingDocId, setDeletingDocId] = useState<number | null>(null);
+
+  // Vector Digestion Pipeline Visualizer State
+  const [digestionVisualStage, setDigestionVisualStage] = useState<number>(1);
+  const [isAutoSimulating, setIsAutoSimulating] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (!isAutoSimulating) return;
+    const interval = setInterval(() => {
+      setDigestionVisualStage((prev) => (prev + 1) % 4);
+    }, 2800);
+    return () => clearInterval(interval);
+  }, [isAutoSimulating]);
 
   // Vector Inspector State
   const [inspectorThreshold, setInspectorThreshold] = useState(0.1);
@@ -204,41 +259,229 @@ export default function RevbotUI() {
     }
   }, [inputQuery, isQuerying, langgraphThreadId]);
 
-  // Execute Ingestion
+  // Real-Time Chunk Simulator (client-side calculation for live preview)
+  const simulatedChunks = useMemo(() => {
+    if (!ingestContent || !ingestContent.trim()) return [];
+    const words = ingestContent.trim().split(/\s+/);
+    const chunks: string[] = [];
+    let index = 0;
+    while (index < words.length) {
+      const chunkWords = words.slice(index, index + chunkSize);
+      chunks.push(chunkWords.join(' '));
+      index += Math.max(1, chunkSize - chunkOverlap);
+    }
+    return chunks;
+  }, [ingestContent, chunkSize, chunkOverlap]);
+
+  // Document Catalog Fetcher
+  const fetchCatalog = useCallback(async () => {
+    setIsLoadingCatalog(true);
+    try {
+      const res = await fetch('/api/rag/documents');
+      if (res.ok) {
+        const data = await res.json();
+        setCatalogDocs(data.documents || []);
+      }
+    } catch (err) {
+      console.error('Failed to load document catalog:', err);
+    } finally {
+      setIsLoadingCatalog(false);
+    }
+  }, []);
+
+  // Fetch catalog when activeTab changes to 'ingest'
+  useEffect(() => {
+    let ignore = false;
+    if (activeTab === 'ingest') {
+      const loadCatalog = async () => {
+        try {
+          const res = await fetch('/api/rag/documents');
+          if (res.ok) {
+            const data = await res.json();
+            if (!ignore) {
+              setCatalogDocs(data.documents || []);
+            }
+          }
+        } catch (err) {
+          console.error('Failed to load document catalog:', err);
+        }
+      };
+      loadCatalog();
+    }
+    return () => {
+      ignore = true;
+    };
+  }, [activeTab]);
+
+  // Delete document and purge vector embeddings from Neon
+  const handleDeleteDocument = async (id: number) => {
+    if (!confirm(`Are you sure you want to delete Document #${id} and purge all its vector chunks from Neon Postgres?`)) return;
+    setDeletingDocId(id);
+    try {
+      const res = await fetch(`/api/rag/documents?id=${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        setCatalogDocs((prev) => prev.filter((d) => d.id !== id));
+      }
+    } catch (err) {
+      console.error('Failed to delete document:', err);
+    } finally {
+      setDeletingDocId(null);
+    }
+  };
+
+  // Handle Drag and Drop / File Input
+  const handleFileDrop = (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const file = files[0];
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const text = (event.target?.result as string) || '';
+      const cleanTitle = file.name.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' ');
+      setIngestTitle(cleanTitle.charAt(0).toUpperCase() + cleanTitle.slice(1));
+      setIngestSource(file.name);
+      setIngestContent(text);
+      setUploadedFiles([{
+        name: file.name,
+        size: file.size,
+        type: file.type || 'text/plain'
+      }]);
+    };
+    reader.readAsText(file);
+  };
+
+  // Sample Templates
+  const handleApplyTemplate = (type: 'sop' | 'compliance' | 'pricing') => {
+    if (type === 'sop') {
+      setIngestTitle('Enterprise RevOps Pipeline & Velocity SOP');
+      setIngestSource('pipeline_acceleration_sop.md');
+      setIngestCategory('Standard Operating Procedures');
+      setIngestSecurityLevel('SOC2 Compliant');
+      setIngestDepartment('RevOps & GTM');
+      setCustomTags(['RevOps', 'Pipeline', 'DealVelocity', 'SOP']);
+      setIngestContent(`Rise Defense Systems Revenue Operations Standard Operating Procedure: Deal Velocity & Pipeline Stage Management.
+1. Purpose and Scope:
+This SOP governs qualification, stage progression, discounting authority, and automated CRM record synchronization across all Enterprise defense and aerospace accounts.
+2. Ingress & Lead Scoring Matrix:
+Every inbound target must be evaluated against our firmographic revenue criteria within 15 minutes of initial telemetry receipt. Automated Revbot routing assigns high-intent defense contractors directly to senior RevOps principals.
+3. Deal Progression Milestones:
+- Stage 1 (Discovery & Security Review): Validate FedRAMP, SOC2 Type II, and CMMC compliance milestones.
+- Stage 2 (Technical Validation): Deploy neon_serverless_postgres test bed and verify pgvector ANN similarity latency under 30ms.
+- Stage 3 (Procurement & Legal): Mandatory sign-off from Chief Revenue Officer for multi-year license contracts.
+4. Retention & Expansion Metrics:
+Net Revenue Retention (NRR) target is 135%. Quarterly health checks are triggered automatically via Vercel Cron scheduled pipelines.`);
+    } else if (type === 'compliance') {
+      setIngestTitle('RevOps Information Security & pgvector Data Isolation Protocol');
+      setIngestSource('infosec_vector_isolation.md');
+      setIngestCategory('Security & Compliance');
+      setIngestSecurityLevel('Confidential');
+      setIngestDepartment('Legal & InfoSec');
+      setCustomTags(['Security', 'Compliance', 'RBAC', 'SOC2', 'Encryption']);
+      setIngestContent(`Rise Defense Systems Information Security & Vector Knowledge Protection Protocol.
+1. Data Storage & Encryption Standards:
+All customer data and generated vector embeddings stored in Neon PostgreSQL Azure eastus2 instances are encrypted at rest using AES-256 and in transit via TLS 1.3.
+2. Vector Index Isolation:
+Vector embeddings generated from document chunks are partitioned logically by organization ID and tenant boundary.
+3. Access Controls:
+Revbot assistant access to high-confidence document chunks is governed by strict JWT role claims. Audit logs are preserved in revops_reports table.`);
+    } else {
+      setIngestTitle('Q3 Enterprise Licensing & Deal Structuring Matrix');
+      setIngestSource('q3_licensing_matrix.csv');
+      setIngestCategory('Pricing & Commercials');
+      setIngestSecurityLevel('Executive Only');
+      setIngestDepartment('Sales Intelligence');
+      setCustomTags(['Pricing', 'Licensing', 'Enterprise', 'Discounts']);
+      setIngestContent(`Tier,Annual ACV Minimum,Discount Authorization,Approval Role,Deployment Target
+Starter Tier,$120000,Up to 10%,RevOps Lead,Multi-tenant Serverless
+Growth Tier,$250000,Up to 15%,VP of Sales,Dedicated Neon Compute
+Enterprise Defense,$750000,Up to 25%,Chief Revenue Officer,Air-gapped / Isolated VPC
+Strategic Sovereign,$1500000,Custom Terms,CEO & Board,On-Premises / Sovereign Cloud`);
+    }
+  };
+
+  // Add custom tag
+  const handleAddTag = () => {
+    if (!newTagInput.trim()) return;
+    const cleanTag = newTagInput.trim().replace(/^#/, '');
+    if (!customTags.includes(cleanTag)) {
+      setCustomTags([...customTags, cleanTag]);
+    }
+    setNewTagInput('');
+  };
+
+  // Remove custom tag
+  const handleRemoveTag = (tagToRemove: string) => {
+    setCustomTags(customTags.filter((t) => t !== tagToRemove));
+  };
+
+  // Execute Ingestion with Pipeline Telemetry
   const handleIngest = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!ingestTitle || !ingestContent || isIngesting) return;
 
     setIsIngesting(true);
-    setIngestResult(null);
+    setIngestTelemetry(null);
+    setIngestStage('parsing');
+    setDigestionVisualStage(0);
 
     try {
+      setIngestStage('chunking');
+      setDigestionVisualStage(1);
+      await new Promise((r) => setTimeout(r, 200));
+
+      setIngestStage('embedding');
+      setDigestionVisualStage(2);
+      await new Promise((r) => setTimeout(r, 250));
+
+      setIngestStage('indexing');
+      setDigestionVisualStage(3);
+
       const res = await fetch('/api/rag/ingest', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           title: ingestTitle,
-          source: ingestSource,
-          metadata: { category: ingestCategory, timestamp: new Date().toISOString() },
-          content: ingestContent
+          source: ingestSource || 'manual_entry.md',
+          metadata: {
+            category: ingestCategory,
+            securityLevel: ingestSecurityLevel,
+            department: ingestDepartment,
+            tags: customTags,
+            timestamp: new Date().toISOString()
+          },
+          content: ingestContent,
+          chunkSize,
+          chunkOverlap
         })
       });
 
       const data = await res.json();
 
       if (res.ok && data.success) {
-        setIngestResult({
+        setIngestStage('complete');
+        setIngestTelemetry({
           success: true,
           documentId: data.documentId,
-          chunksCreated: data.chunksCreated
+          title: data.title,
+          chunksCreated: data.chunksCreated,
+          totalWords: data.totalWords,
+          averageWordsPerChunk: data.averageWordsPerChunk,
+          chunkSize: data.chunkSize,
+          chunkOverlap: data.chunkOverlap,
+          elapsedMs: data.elapsedMs,
+          sampleSnippet: data.sampleSnippet
         });
-        setIngestTitle('');
-        setIngestContent('');
+        fetchCatalog();
       } else {
-        setIngestResult({ success: false });
+        setIngestStage('error');
+        setIngestTelemetry({
+          success: false,
+          error: data.error || 'Ingestion failed.'
+        });
       }
-    } catch {
-      setIngestResult({ success: false });
+    } catch (err: unknown) {
+      setIngestStage('error');
+      const msg = err instanceof Error ? err.message : 'Network error during ingestion.';
+      setIngestTelemetry({ success: false, error: msg });
     } finally {
       setIsIngesting(false);
     }
@@ -647,141 +890,891 @@ export default function RevbotUI() {
           </div>
         )}
 
-        {/* TAB 2: KNOWLEDGE INGESTION */}
+        {/* TAB 2: REVOPS INGRESS STUDIO */}
         {activeTab === 'ingest' && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 flex-1">
-            <div className="lg:col-span-2 glass-panel rounded-2xl p-6 border border-orange-500/20">
-              <div className="flex items-center gap-3 mb-6">
-                <div className="w-10 h-10 rounded-xl bg-orange-500/20 border border-orange-500/40 flex items-center justify-center">
-                  <FileText className="w-5 h-5 text-orange-400" />
+          <div className="flex flex-col gap-6 flex-1">
+            
+            {/* Top Studio Control Bar & Mode Selector */}
+            <div className="glass-panel rounded-2xl p-6 border border-orange-500/20 flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-xl bg-orange-500/20 border border-orange-500/40 flex items-center justify-center shadow-lg shadow-orange-500/10">
+                  <UploadCloud className="w-6 h-6 text-orange-400" />
                 </div>
                 <div>
-                  <h2 className="text-lg font-bold text-slate-100">Ingest Knowledge Base into Neon Postgres</h2>
-                  <p className="text-xs text-slate-400">Documents will be chunked into overlapping segments, vector-embedded, and indexed in Neon</p>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-lg font-bold text-slate-100">RevOps Ingress Studio</h2>
+                    <span className="px-2 py-0.5 rounded-full bg-orange-500/10 border border-orange-500/30 text-orange-400 font-mono text-[10px] font-semibold uppercase tracking-wider">
+                      pgvector Chunk Engine
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400">Transform documents into semantically windowed 1536-dim vector embeddings in Neon Postgres</p>
                 </div>
               </div>
 
-              <form onSubmit={handleIngest} className="space-y-4">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">Document Title *</label>
-                    <input
-                      type="text"
-                      required
-                      value={ingestTitle}
-                      onChange={(e) => setIngestTitle(e.target.value)}
-                      placeholder="e.g., Q3 RevOps Sales Strategy"
-                      className="w-full bg-slate-900/90 border border-slate-800 focus:border-orange-500/60 rounded-xl px-3.5 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none transition-colors"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">Source Identifier</label>
-                    <input
-                      type="text"
-                      value={ingestSource}
-                      onChange={(e) => setIngestSource(e.target.value)}
-                      placeholder="e.g., revops_strategy_v2.pdf"
-                      className="w-full bg-slate-900/90 border border-slate-800 focus:border-orange-500/60 rounded-xl px-3.5 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none transition-colors"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">Category Metadata Tag</label>
-                  <input
-                    type="text"
-                    value={ingestCategory}
-                    onChange={(e) => setIngestCategory(e.target.value)}
-                    placeholder="e.g., Revenue Operations, SOP, System Docs"
-                    className="w-full bg-slate-900/90 border border-slate-800 focus:border-orange-500/60 rounded-xl px-3.5 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none transition-colors"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">Document Content *</label>
-                  <textarea
-                    required
-                    rows={8}
-                    value={ingestContent}
-                    onChange={(e) => setIngestContent(e.target.value)}
-                    placeholder="Paste full text knowledge here. Revbot will automatically split this into overlapping 300-word chunks for vector search..."
-                    className="w-full bg-slate-900/90 border border-slate-800 focus:border-orange-500/60 rounded-xl p-3.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none transition-colors"
-                  />
-                </div>
-
-                <div className="flex items-center justify-between pt-2">
-                  <div className="text-xs text-slate-400">
-                    Estimated Chunks: <span className="font-mono text-orange-400 font-semibold">{Math.max(1, Math.ceil(ingestContent.split(/\s+/).length / 250))}</span>
-                  </div>
-
+              {/* Mode Switcher & Quick Template Buttons */}
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex items-center bg-slate-900/90 rounded-xl p-1 border border-slate-800">
                   <button
-                    type="submit"
-                    disabled={isIngesting || !ingestTitle || !ingestContent}
-                    className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-400 hover:to-orange-500 text-white font-semibold text-sm flex items-center gap-2 shadow-lg shadow-orange-500/20 disabled:opacity-50 transition-all"
+                    type="button"
+                    onClick={() => setIngestInputMode('upload')}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                      ingestInputMode === 'upload'
+                        ? 'bg-orange-500 text-white shadow-md shadow-orange-500/20'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
                   >
-                    {isIngesting ? (
-                      <>
-                        <RefreshCw className="w-4 h-4 animate-spin" />
-                        <span>Indexing to Neon...</span>
-                      </>
-                    ) : (
-                      <>
-                        <span>Ingest & Create Embeddings</span>
-                        <ArrowRight className="w-4 h-4" />
-                      </>
-                    )}
+                    <FileUp className="w-3.5 h-3.5" />
+                    <span>File Upload</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIngestInputMode('manual')}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                      ingestInputMode === 'manual'
+                        ? 'bg-orange-500 text-white shadow-md shadow-orange-500/20'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <FileCode className="w-3.5 h-3.5" />
+                    <span>Direct Editor</span>
                   </button>
                 </div>
-              </form>
 
-              {/* Ingestion Feedback Result */}
-              {ingestResult && (
-                <div className={`mt-6 p-4 rounded-xl border flex items-center gap-3 ${
-                  ingestResult.success 
-                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
-                    : 'bg-red-500/10 border-red-500/30 text-red-300'
-                }`}>
-                  <CheckCircle2 className="w-5 h-5 shrink-0" />
+                <div className="hidden sm:flex items-center gap-1.5 pl-2 border-l border-slate-800">
+                  <span className="text-[11px] text-slate-400">Presets:</span>
+                  <button
+                    type="button"
+                    onClick={() => handleApplyTemplate('sop')}
+                    className="text-[11px] px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-orange-300 border border-slate-800 transition-colors"
+                  >
+                    Pipeline SOP
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleApplyTemplate('compliance')}
+                    className="text-[11px] px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-orange-300 border border-slate-800 transition-colors"
+                  >
+                    Security Protocol
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleApplyTemplate('pricing')}
+                    className="text-[11px] px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-orange-300 border border-slate-800 transition-colors"
+                  >
+                    Pricing Matrix
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* NEURAL VECTOR DIGESTION PIPELINE VISUALIZER */}
+            <div className="glass-panel rounded-2xl p-6 border border-sky-500/20 shadow-xl flex flex-col gap-6 relative overflow-hidden">
+              {/* Background Ambient Glow */}
+              <div className="absolute -right-24 -top-24 w-96 h-96 bg-gradient-to-br from-sky-500/10 via-orange-500/5 to-transparent rounded-full blur-3xl pointer-events-none" />
+              <div className="absolute -left-24 -bottom-24 w-96 h-96 bg-gradient-to-tr from-purple-500/10 via-sky-500/5 to-transparent rounded-full blur-3xl pointer-events-none" />
+
+              {/* Visualizer Header */}
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800/80 pb-4 relative z-10">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-sky-500/20 to-orange-500/20 border border-sky-500/40 flex items-center justify-center shadow-lg shadow-sky-500/10">
+                    <BrainCircuit className="w-5 h-5 text-sky-400" />
+                  </div>
                   <div>
-                    <p className="font-semibold text-sm">
-                      {ingestResult.success ? 'Document Indexed Successfully!' : 'Ingestion Failed'}
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-base font-bold text-slate-100">Neural Vector Digestion Pipeline</h3>
+                      <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-mono text-[10px] font-semibold flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                        Live ML Vector Engine
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-400">
+                      Visualizing how unstructured RevOps documentation is digested into a 1536-dimensional HNSW vector database
                     </p>
-                    {ingestResult.success && (
-                      <p className="text-xs text-emerald-400/80 font-mono">
-                        Neon Document ID: #{ingestResult.documentId} • Created {ingestResult.chunksCreated} vector chunks
-                      </p>
+                  </div>
+                </div>
+
+                {/* Pipeline Controls: Auto-Play & Stage Scrubbers */}
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsAutoSimulating(!isAutoSimulating)}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
+                      isAutoSimulating
+                        ? 'bg-gradient-to-r from-orange-500 to-sky-500 text-white shadow-lg shadow-orange-500/20'
+                        : 'bg-slate-900/90 hover:bg-slate-800 text-slate-300 border border-slate-800'
+                    }`}
+                  >
+                    {isAutoSimulating ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5 text-orange-400" />}
+                    <span>{isAutoSimulating ? 'Pause Flow' : 'Auto-Play Digestion'}</span>
+                  </button>
+
+                  {/* Stage Jump Buttons */}
+                  <div className="flex items-center bg-slate-900/90 rounded-xl p-1 border border-slate-800 text-xs">
+                    {[
+                      { idx: 0, label: '1. Raw Text' },
+                      { idx: 1, label: '2. Sliding Window' },
+                      { idx: 2, label: '3. 1536-D Tensors' },
+                      { idx: 3, label: '4. HNSW Graph' }
+                    ].map((step) => (
+                      <button
+                        key={step.idx}
+                        type="button"
+                        onClick={() => {
+                          setDigestionVisualStage(step.idx);
+                          setIsAutoSimulating(false);
+                        }}
+                        className={`px-2.5 py-1 rounded-lg font-medium text-[11px] transition-all ${
+                          digestionVisualStage === step.idx
+                            ? 'bg-sky-500/20 text-sky-300 border border-sky-500/40 shadow-sm'
+                            : 'text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        {step.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* 4-Stage Visual Interactive Flow Canvas */}
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 relative z-10">
+                
+                {/* STAGE 1: RAW STREAM */}
+                <div
+                  onClick={() => { setDigestionVisualStage(0); setIsAutoSimulating(false); }}
+                  className={`p-4 rounded-xl border transition-all cursor-pointer flex flex-col justify-between gap-3 ${
+                    digestionVisualStage === 0
+                      ? 'bg-slate-900/95 border-sky-500 ring-1 ring-sky-500/50 shadow-lg shadow-sky-500/10 scale-[1.02]'
+                      : 'bg-slate-950/60 border-slate-800/80 hover:border-slate-700 opacity-75'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-mono uppercase tracking-wider text-sky-400 font-bold">Stage 1</span>
+                    <FileText className="w-4 h-4 text-sky-400" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-slate-100">Raw Unstructured Text</h4>
+                    <p className="text-[11px] text-slate-400 mt-0.5">SOPs, Playbooks & Audio</p>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-900 font-mono text-[10px] text-slate-300 space-y-1 overflow-hidden h-20">
+                    <div className="text-sky-300/90 truncate">&gt; RDS RevOps Deal Stage 2</div>
+                    <div className="text-slate-400 truncate">&gt; CMMC Milestones Passed</div>
+                    <div className="text-orange-400/90 truncate">&gt; CAC Payback: 8.2 Months</div>
+                    <div className="text-slate-500 truncate">&gt; NRR Target: 135% ARR</div>
+                  </div>
+                  <div className="text-[10px] font-mono text-slate-400 flex items-center justify-between border-t border-slate-900 pt-2">
+                    <span>Input: String</span>
+                    <span className="text-sky-400">Continuous</span>
+                  </div>
+                </div>
+
+                {/* STAGE 2: SLIDING CONTEXT WINDOW */}
+                <div
+                  onClick={() => { setDigestionVisualStage(1); setIsAutoSimulating(false); }}
+                  className={`p-4 rounded-xl border transition-all cursor-pointer flex flex-col justify-between gap-3 ${
+                    digestionVisualStage === 1
+                      ? 'bg-slate-900/95 border-orange-500 ring-1 ring-orange-500/50 shadow-lg shadow-orange-500/10 scale-[1.02]'
+                      : 'bg-slate-950/60 border-slate-800/80 hover:border-slate-700 opacity-75'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-mono uppercase tracking-wider text-orange-400 font-bold">Stage 2</span>
+                    <Scissors className="w-4 h-4 text-orange-400" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-slate-100">Sliding Context Window</h4>
+                    <p className="text-[11px] text-slate-400 mt-0.5">Token Slicing & Continuity</p>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-900 flex flex-col justify-center gap-1.5 h-20">
+                    <div className="flex items-center gap-1 text-[10px] font-mono">
+                      <span className="px-1.5 py-0.5 rounded bg-sky-500/20 border border-sky-500/40 text-sky-300 truncate">Chunk [1..{chunkSize}]</span>
+                      <span className="text-slate-500">➔</span>
+                    </div>
+                    <div className="flex items-center gap-1 text-[10px] font-mono">
+                      <span className="px-1.5 py-0.5 rounded bg-orange-500/20 border border-orange-500/40 text-orange-300 font-semibold truncate">
+                        Overlap: +{chunkOverlap}w
+                      </span>
+                    </div>
+                    <div className="text-[9px] font-mono text-emerald-400 truncate">
+                      ✓ No Boundary Hallucinations
+                    </div>
+                  </div>
+                  <div className="text-[10px] font-mono text-slate-400 flex items-center justify-between border-t border-slate-900 pt-2">
+                    <span>Window: {chunkSize}w</span>
+                    <span className="text-orange-400">{chunkOverlap}w Overlap</span>
+                  </div>
+                </div>
+
+                {/* STAGE 3: 1536-D NEURAL EMBEDDING */}
+                <div
+                  onClick={() => { setDigestionVisualStage(2); setIsAutoSimulating(false); }}
+                  className={`p-4 rounded-xl border transition-all cursor-pointer flex flex-col justify-between gap-3 ${
+                    digestionVisualStage === 2
+                      ? 'bg-slate-900/95 border-purple-500 ring-1 ring-purple-500/50 shadow-lg shadow-purple-500/10 scale-[1.02]'
+                      : 'bg-slate-950/60 border-slate-800/80 hover:border-slate-700 opacity-75'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-mono uppercase tracking-wider text-purple-400 font-bold">Stage 3</span>
+                    <Sparkles className="w-4 h-4 text-purple-400" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-slate-100">1536-D Tensor Projection</h4>
+                    <p className="text-[11px] text-slate-400 mt-0.5">Semantic High-D Embedding</p>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-900 flex flex-col justify-center gap-1.5 h-20 overflow-hidden font-mono text-[10px]">
+                    <div className="text-purple-300 truncate">[ +0.1429, -0.8912,</div>
+                    <div className="text-sky-300 truncate">  +0.3341, -0.0482,</div>
+                    <div className="text-emerald-300 truncate">  ... +0.0215 (1536)]</div>
+                  </div>
+                  <div className="text-[10px] font-mono text-slate-400 flex items-center justify-between border-t border-slate-900 pt-2">
+                    <span>Format: Float32</span>
+                    <span className="text-purple-400">Normalized</span>
+                  </div>
+                </div>
+
+                {/* STAGE 4: HNSW PROXIMITY GRAPH */}
+                <div
+                  onClick={() => { setDigestionVisualStage(3); setIsAutoSimulating(false); }}
+                  className={`p-4 rounded-xl border transition-all cursor-pointer flex flex-col justify-between gap-3 ${
+                    digestionVisualStage === 3
+                      ? 'bg-slate-900/95 border-emerald-500 ring-1 ring-emerald-500/50 shadow-lg shadow-emerald-500/10 scale-[1.02]'
+                      : 'bg-slate-950/60 border-slate-800/80 hover:border-slate-700 opacity-75'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-mono uppercase tracking-wider text-emerald-400 font-bold">Stage 4</span>
+                    <Database className="w-4 h-4 text-emerald-400" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-slate-100">Neon HNSW Index</h4>
+                    <p className="text-[11px] text-slate-400 mt-0.5">Approximate Nearest Neighbor</p>
+                  </div>
+                  {/* Mini SVG Graph Illustration */}
+                  <div className="p-2 rounded-lg bg-slate-950 border border-slate-900 flex items-center justify-center h-20 relative overflow-hidden">
+                    <svg className="w-full h-full" viewBox="0 0 100 50">
+                      <line x1="20" y1="25" x2="50" y2="15" stroke="rgba(14,165,233,0.4)" strokeWidth="1" />
+                      <line x1="50" y1="15" x2="80" y2="25" stroke="rgba(14,165,233,0.4)" strokeWidth="1" />
+                      <line x1="50" y1="15" x2="50" y2="40" stroke="rgba(249,115,22,0.4)" strokeWidth="1" />
+                      <line x1="20" y1="25" x2="50" y2="40" stroke="rgba(52,211,153,0.4)" strokeWidth="1" />
+                      <line x1="80" y1="25" x2="50" y2="40" stroke="rgba(52,211,153,0.4)" strokeWidth="1" />
+                      
+                      <circle cx="20" cy="25" r="4" fill="#0ea5e9" />
+                      <circle cx="80" cy="25" r="4" fill="#0ea5e9" />
+                      <circle cx="50" cy="15" r="5" fill="#f97316" className="animate-pulse" />
+                      <circle cx="50" cy="40" r="4" fill="#10b981" />
+                    </svg>
+                    <span className="absolute bottom-1 right-2 text-[9px] font-mono text-emerald-400">cos(θ) &lt; 0.2</span>
+                  </div>
+                  <div className="text-[10px] font-mono text-slate-400 flex items-center justify-between border-t border-slate-900 pt-2">
+                    <span>Engine: Neon DB</span>
+                    <span className="text-emerald-400">&lt; 25ms Query</span>
+                  </div>
+                </div>
+
+              </div>
+
+              {/* Dynamic Deep-Dive Stage Telemetry Card */}
+              <div className="p-4 rounded-xl bg-slate-950/80 border border-slate-800/80 flex flex-col md:flex-row md:items-center justify-between gap-4 relative z-10 text-xs">
+                <div className="flex items-start gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-sky-500/10 border border-sky-500/30 flex items-center justify-center shrink-0 mt-0.5">
+                    {digestionVisualStage === 0 && <FileText className="w-4 h-4 text-sky-400" />}
+                    {digestionVisualStage === 1 && <Scissors className="w-4 h-4 text-orange-400" />}
+                    {digestionVisualStage === 2 && <Sparkles className="w-4 h-4 text-purple-400" />}
+                    {digestionVisualStage === 3 && <Database className="w-4 h-4 text-emerald-400" />}
+                  </div>
+                  <div>
+                    <h5 className="font-semibold text-slate-200">
+                      {digestionVisualStage === 0 && 'Stage 1: Raw Unstructured Context Ingress'}
+                      {digestionVisualStage === 1 && `Stage 2: Sliding Context Window Tokenization (${chunkSize}w / ${chunkOverlap}w overlap)`}
+                      {digestionVisualStage === 2 && 'Stage 3: 1,536-Dimensional Neural Vector Tensor Projection'}
+                      {digestionVisualStage === 3 && 'Stage 4: Neon Postgres HNSW Graph Indexing (Azure eastus2)'}
+                    </h5>
+                    <p className="text-slate-400 mt-1 leading-relaxed text-[11px]">
+                      {digestionVisualStage === 0 && 'RevOps SOPs, sales agreements, and transcripts are sanitized and parsed into UTF-8 token sequences for vector database ingress.'}
+                      {digestionVisualStage === 1 && `Text is segmented into overlapping ${chunkSize}-word chunks with a ${chunkOverlap}-word continuity bridge so critical contract terms or compliance rules are never severed across chunk borders.`}
+                      {digestionVisualStage === 2 && 'Each text chunk is converted into a 1536-dimensional dense float vector, positioning semantically similar concepts together in high-dimensional hyperspace.'}
+                      {digestionVisualStage === 3 && 'Vectors are committed into Neon PostgreSQL document_chunks using the pgvector extension, indexed via HNSW cosine similarity graphs for sub-25ms retrieval when Revbot reasons.'}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Architecture Metric Badges */}
+                <div className="flex items-center gap-2 shrink-0 flex-wrap font-mono text-[10px]">
+                  <span className="px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-800 text-slate-300">
+                    M=16 efConstruction=64
+                  </span>
+                  <span className="px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-800 text-orange-300">
+                    pgvector 1536
+                  </span>
+                  <span className="px-2.5 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400">
+                    HTTP Pool Ready
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Main Studio Grid: Ingress Form + Live Simulator */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+              
+              {/* Left Column: Upload / Content & Metadata Form (7 Cols) */}
+              <div className="lg:col-span-7 flex flex-col gap-6">
+                <div className="glass-panel rounded-2xl p-6 border border-slate-800 flex flex-col gap-5">
+                  
+                  {/* File Upload Mode: Drag and Drop Dropzone */}
+                  {ingestInputMode === 'upload' && (
+                    <div>
+                      <input
+                        type="file"
+                        ref={fileInputRef}
+                        accept=".md,.txt,.json,.csv"
+                        className="hidden"
+                        onChange={(e) => handleFileDrop(e.target.files)}
+                      />
+
+                      <div
+                        onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+                        onDragLeave={() => setIsDragging(false)}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          setIsDragging(false);
+                          handleFileDrop(e.dataTransfer.files);
+                        }}
+                        onClick={() => fileInputRef.current?.click()}
+                        className={`border-2 border-dashed rounded-2xl p-8 flex flex-col items-center justify-center gap-3 cursor-pointer transition-all ${
+                          isDragging
+                            ? 'border-orange-500 bg-orange-500/10 scale-[1.01]'
+                            : 'border-slate-800 hover:border-orange-500/50 bg-slate-950/60 hover:bg-slate-900/40'
+                        }`}
+                      >
+                        <div className="w-12 h-12 rounded-2xl bg-orange-500/10 border border-orange-500/30 flex items-center justify-center text-orange-400">
+                          <UploadCloud className="w-6 h-6 animate-bounce" />
+                        </div>
+                        <div className="text-center">
+                          <p className="text-sm font-semibold text-slate-200">
+                            Drag & drop RevOps documentation or <span className="text-orange-400 underline decoration-orange-400/50">browse files</span>
+                          </p>
+                          <p className="text-xs text-slate-400 mt-1">
+                            Supports Markdown (.md), Plain Text (.txt), JSON (.json), and CSV (.csv) up to 10MB
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* File Card Preview */}
+                      {uploadedFiles.length > 0 && (
+                        <div className="mt-3 p-3.5 rounded-xl bg-slate-900/90 border border-emerald-500/30 flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center">
+                              <FileText className="w-4 h-4" />
+                            </div>
+                            <div>
+                              <p className="text-xs font-semibold text-slate-200">{uploadedFiles[0].name}</p>
+                              <p className="text-[11px] text-slate-400 font-mono">{(uploadedFiles[0].size / 1024).toFixed(1)} KB • Parsed & Ready</p>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setUploadedFiles([]);
+                              setIngestContent('');
+                              setIngestTitle('');
+                              setIngestSource('');
+                            }}
+                            className="text-xs text-slate-400 hover:text-red-400 px-2 py-1 rounded-lg hover:bg-red-500/10 transition-colors"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Document Identifiers */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 mb-1.5 flex items-center gap-1.5">
+                        <FileText className="w-3.5 h-3.5 text-orange-400" />
+                        <span>Document Title *</span>
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={ingestTitle}
+                        onChange={(e) => setIngestTitle(e.target.value)}
+                        placeholder="e.g., Q3 RevOps Pipeline Acceleration Playbook"
+                        className="w-full bg-slate-900/90 border border-slate-800 focus:border-orange-500/60 rounded-xl px-3.5 py-2.5 text-xs text-slate-100 placeholder-slate-500 focus:outline-none transition-colors"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 mb-1.5 flex items-center gap-1.5">
+                        <FileCode className="w-3.5 h-3.5 text-sky-400" />
+                        <span>Source Identifier</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={ingestSource}
+                        onChange={(e) => setIngestSource(e.target.value)}
+                        placeholder="e.g., revops_playbook_2026.md"
+                        className="w-full bg-slate-900/90 border border-slate-800 focus:border-sky-500/60 rounded-xl px-3.5 py-2.5 text-xs text-slate-100 placeholder-slate-500 focus:outline-none transition-colors"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Direct Editor Textarea */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                        <span>Document Knowledge Content *</span>
+                      </label>
+                      <div className="text-[11px] font-mono text-slate-400">
+                        {ingestContent ? ingestContent.trim().split(/\s+/).length : 0} words • {ingestContent.length} chars
+                      </div>
+                    </div>
+                    <textarea
+                      required
+                      rows={8}
+                      value={ingestContent}
+                      onChange={(e) => setIngestContent(e.target.value)}
+                      placeholder="Paste or edit RevOps procedures, pipeline guidelines, or security documentation here. The live chunk simulator below will instantaneously compute chunk windows..."
+                      className="w-full bg-slate-900/90 border border-slate-800 focus:border-orange-500/60 rounded-xl p-3.5 text-xs text-slate-100 placeholder-slate-500 focus:outline-none font-mono leading-relaxed transition-colors"
+                    />
+                  </div>
+
+                  {/* Governance & Metadata Controls */}
+                  <div className="p-4 rounded-xl bg-slate-950/70 border border-slate-800/80 flex flex-col gap-3">
+                    <div className="flex items-center gap-2 text-xs font-semibold text-slate-200">
+                      <Shield className="w-4 h-4 text-emerald-400" />
+                      <span>Governance & Metadata Tagging</span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <span className="block text-[11px] text-slate-400 mb-1">Knowledge Category</span>
+                        <select
+                          value={ingestCategory}
+                          onChange={(e) => setIngestCategory(e.target.value)}
+                          className="w-full bg-slate-900 border border-slate-800 text-xs text-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none"
+                        >
+                          <option value="Standard Operating Procedures">Standard Operating Procedures</option>
+                          <option value="Sales Playbooks">Sales Playbooks</option>
+                          <option value="Pricing & Commercials">Pricing & Commercials</option>
+                          <option value="Security & Compliance">Security & Compliance</option>
+                          <option value="Customer Success & Retention">Customer Success & Retention</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <span className="block text-[11px] text-slate-400 mb-1">Department Scope</span>
+                        <select
+                          value={ingestDepartment}
+                          onChange={(e) => setIngestDepartment(e.target.value)}
+                          className="w-full bg-slate-900 border border-slate-800 text-xs text-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none"
+                        >
+                          <option value="RevOps & GTM">RevOps & GTM</option>
+                          <option value="Sales Intelligence">Sales Intelligence</option>
+                          <option value="Customer Success">Customer Success</option>
+                          <option value="Legal & InfoSec">Legal & InfoSec</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* Security Level Radio Pills */}
+                    <div>
+                      <span className="block text-[11px] text-slate-400 mb-1.5">Security Classification</span>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        {[
+                          { id: 'Internal', color: 'text-slate-300 border-slate-700 bg-slate-800/50' },
+                          { id: 'Confidential', color: 'text-amber-400 border-amber-500/40 bg-amber-500/10' },
+                          { id: 'SOC2 Compliant', color: 'text-emerald-400 border-emerald-500/40 bg-emerald-500/10' },
+                          { id: 'Executive Only', color: 'text-rose-400 border-rose-500/40 bg-rose-500/10' },
+                        ].map((sec) => (
+                          <button
+                            key={sec.id}
+                            type="button"
+                            onClick={() => setIngestSecurityLevel(sec.id as typeof ingestSecurityLevel)}
+                            className={`px-2 py-1.5 rounded-lg text-[11px] font-medium border text-center transition-all ${
+                              ingestSecurityLevel === sec.id
+                                ? `${sec.color} ring-1 ring-orange-400/50 shadow-sm`
+                                : 'text-slate-400 border-slate-800 bg-slate-900/50 hover:bg-slate-900'
+                            }`}
+                          >
+                            {sec.id}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Tag Pills */}
+                    <div>
+                      <span className="block text-[11px] text-slate-400 mb-1.5">Keywords & Tags</span>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {customTags.map((tag) => (
+                          <span
+                            key={tag}
+                            className="px-2 py-0.5 rounded-full bg-slate-900 border border-slate-800 text-[11px] font-mono text-sky-300 flex items-center gap-1"
+                          >
+                            <span>#{tag}</span>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveTag(tag)}
+                              className="text-slate-500 hover:text-red-400"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </span>
+                        ))}
+                        <div className="flex items-center gap-1">
+                          <input
+                            type="text"
+                            value={newTagInput}
+                            onChange={(e) => setNewTagInput(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleAddTag(); } }}
+                            placeholder="+ Add Tag"
+                            className="w-20 bg-slate-900 border border-slate-800 rounded-full px-2 py-0.5 text-[11px] text-slate-200 placeholder-slate-500 focus:outline-none"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Submission & Action Button */}
+                  <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2">
+                    <div className="text-xs text-slate-400 flex items-center gap-2">
+                      <Zap className="w-3.5 h-3.5 text-orange-400" />
+                      <span>Ready to segment <strong className="text-orange-400 font-mono">{simulatedChunks.length}</strong> vector chunks into Neon HNSW</span>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={handleIngest}
+                      disabled={isIngesting || !ingestTitle || !ingestContent.trim()}
+                      className="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-400 hover:to-orange-500 text-white font-semibold text-xs flex items-center justify-center gap-2 shadow-lg shadow-orange-500/20 disabled:opacity-50 transition-all"
+                    >
+                      {isIngesting ? (
+                        <>
+                          <RefreshCw className="w-4 h-4 animate-spin" />
+                          <span>Executing Ingress...</span>
+                        </>
+                      ) : (
+                        <>
+                          <span>Ingest & Index to Neon Postgres</span>
+                          <ArrowRight className="w-4 h-4" />
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  {/* Live Stepper Telemetry during ingestion */}
+                  {isIngesting && (
+                    <div className="p-4 rounded-xl bg-slate-950/90 border border-orange-500/30 flex flex-col gap-2">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-semibold text-orange-300 flex items-center gap-1.5">
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin text-orange-400" />
+                          Ingestion Pipeline Active: {ingestStage.toUpperCase()}
+                        </span>
+                        <span className="font-mono text-slate-400 text-[11px]">Azure eastus2</span>
+                      </div>
+                      <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                        <div 
+                          className="bg-gradient-to-r from-orange-500 to-sky-400 h-full transition-all duration-300"
+                          style={{
+                            width: ingestStage === 'parsing' ? '25%' : ingestStage === 'chunking' ? '50%' : ingestStage === 'embedding' ? '75%' : '95%'
+                          }}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Ingestion Telemetry Feedback Alert */}
+                  {ingestTelemetry && (
+                    <div className={`p-4 rounded-xl border flex flex-col gap-3 ${
+                      ingestTelemetry.success 
+                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                        : 'bg-red-500/10 border-red-500/30 text-red-300'
+                    }`}>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+                          <span className="font-semibold text-sm">
+                            {ingestTelemetry.success ? 'Document Successfully Indexed in Neon Postgres!' : 'Ingestion Failed'}
+                          </span>
+                        </div>
+                        {ingestTelemetry.elapsedMs && (
+                          <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300">
+                            {ingestTelemetry.elapsedMs}ms
+                          </span>
+                        )}
+                      </div>
+
+                      {ingestTelemetry.success ? (
+                        <div className="flex flex-col gap-2 text-xs">
+                          <div className="flex flex-wrap items-center gap-3 font-mono text-[11px] text-emerald-400/90">
+                            <span>Document ID: #{ingestTelemetry.documentId}</span>
+                            <span>•</span>
+                            <span>Created: {ingestTelemetry.chunksCreated} Chunks</span>
+                            <span>•</span>
+                            <span>Total Words: {ingestTelemetry.totalWords}</span>
+                            <span>•</span>
+                            <span>Avg Chunks: {ingestTelemetry.averageWordsPerChunk} words</span>
+                          </div>
+
+                          {/* Quick Follow-up Actions */}
+                          <div className="flex items-center gap-2 pt-2 border-t border-emerald-500/20">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setInputQuery(`Tell me about ${ingestTelemetry.title}`);
+                                setActiveTab('chat');
+                              }}
+                              className="px-3 py-1.5 rounded-lg bg-sky-500/20 hover:bg-sky-500/30 border border-sky-500/40 text-sky-200 font-medium text-xs flex items-center gap-1.5 transition-colors"
+                            >
+                              <Bot className="w-3.5 h-3.5 text-sky-400" />
+                              <span>Ask Revbot Copilot</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setInspectorQueryText(ingestTelemetry.title || '');
+                                setActiveTab('inspector');
+                              }}
+                              className="px-3 py-1.5 rounded-lg bg-orange-500/20 hover:bg-orange-500/30 border border-orange-500/40 text-orange-200 font-medium text-xs flex items-center gap-1.5 transition-colors"
+                            >
+                              <Database className="w-3.5 h-3.5 text-orange-400" />
+                              <span>Inspect in Vector Inspector</span>
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <p className="text-xs text-red-300">{ingestTelemetry.error}</p>
+                      )}
+                    </div>
+                  )}
+
+                </div>
+              </div>
+
+              {/* Right Column: Real-Time Chunk Simulator & Ingested Catalog (5 Cols) */}
+              <div className="lg:col-span-5 flex flex-col gap-6">
+                
+                {/* Real-Time Chunking Simulator Card */}
+                <div className="glass-card rounded-2xl p-6 flex flex-col gap-5 border border-orange-500/20">
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                    <div className="flex items-center gap-2">
+                      <Scissors className="w-4 h-4 text-orange-400" />
+                      <h3 className="font-semibold text-sm text-slate-100">Interactive Chunking Engine</h3>
+                    </div>
+                    <span className="text-[11px] font-mono text-orange-400 bg-orange-500/10 px-2 py-0.5 rounded-full border border-orange-500/30">
+                      Live Preview
+                    </span>
+                  </div>
+
+                  {/* Sliders */}
+                  <div className="space-y-4">
+                    <div>
+                      <div className="flex items-center justify-between text-xs mb-1.5">
+                        <span className="text-slate-300 font-medium">Chunk Size (Words)</span>
+                        <span className="font-mono text-orange-400 font-bold">{chunkSize} words</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="100"
+                        max="800"
+                        step="25"
+                        value={chunkSize}
+                        onChange={(e) => {
+                          const val = parseInt(e.target.value);
+                          setChunkSize(val);
+                          if (chunkOverlap >= val) {
+                            setChunkOverlap(Math.floor(val / 4));
+                          }
+                        }}
+                        className="w-full accent-orange-500"
+                      />
+                      <div className="flex justify-between text-[10px] text-slate-500 font-mono mt-1">
+                        <span>100 (Fine)</span>
+                        <span>400 (Standard)</span>
+                        <span>800 (Broad)</span>
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="flex items-center justify-between text-xs mb-1.5">
+                        <span className="text-slate-300 font-medium">Chunk Overlap (Words)</span>
+                        <span className="font-mono text-sky-400 font-bold">{chunkOverlap} words</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="10"
+                        max={Math.floor(chunkSize / 2)}
+                        step="5"
+                        value={chunkOverlap}
+                        onChange={(e) => setChunkOverlap(parseInt(e.target.value))}
+                        className="w-full accent-sky-500"
+                      />
+                      <div className="flex justify-between text-[10px] text-slate-500 font-mono mt-1">
+                        <span>10 words</span>
+                        <span>{Math.round((chunkOverlap / chunkSize) * 100)}% continuity ratio</span>
+                        <span>{Math.floor(chunkSize / 2)} words max</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Summary Metrics Pill */}
+                  <div className="grid grid-cols-3 gap-2 p-3 rounded-xl bg-slate-950/80 border border-slate-800 text-center">
+                    <div>
+                      <span className="block text-[10px] text-slate-400 uppercase font-mono">Chunks</span>
+                      <span className="text-base font-bold text-orange-400 font-mono">{simulatedChunks.length}</span>
+                    </div>
+                    <div>
+                      <span className="block text-[10px] text-slate-400 uppercase font-mono">Tokens (Est.)</span>
+                      <span className="text-base font-bold text-sky-400 font-mono">{Math.round(chunkSize * 1.33)}</span>
+                    </div>
+                    <div>
+                      <span className="block text-[10px] text-slate-400 uppercase font-mono">Vectors</span>
+                      <span className="text-base font-bold text-emerald-400 font-mono">1536 dims</span>
+                    </div>
+                  </div>
+
+                  {/* Live Visualizer: Simulated Chunk Slices */}
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-medium text-slate-300 flex items-center gap-1">
+                        <Eye className="w-3.5 h-3.5 text-sky-400" />
+                        <span>Simulated Chunk Inspector</span>
+                      </span>
+                      {simulatedChunks.length > 0 && (
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            disabled={previewChunkIndex === 0}
+                            onClick={() => setPreviewChunkIndex((prev) => Math.max(0, prev - 1))}
+                            className="px-2 py-0.5 rounded bg-slate-900 text-slate-300 hover:bg-slate-800 disabled:opacity-40 text-xs font-mono"
+                          >
+                            Prev
+                          </button>
+                          <span className="text-[11px] font-mono text-slate-400 px-1">
+                            {previewChunkIndex + 1}/{simulatedChunks.length}
+                          </span>
+                          <button
+                            type="button"
+                            disabled={previewChunkIndex >= simulatedChunks.length - 1}
+                            onClick={() => setPreviewChunkIndex((prev) => Math.min(simulatedChunks.length - 1, prev + 1))}
+                            className="px-2 py-0.5 rounded bg-slate-900 text-slate-300 hover:bg-slate-800 disabled:opacity-40 text-xs font-mono"
+                          >
+                            Next
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    {simulatedChunks.length > 0 ? (
+                      <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800/90 text-xs flex flex-col gap-2">
+                        <div className="flex items-center justify-between border-b border-slate-900 pb-2">
+                          <span className="font-mono text-orange-400 font-semibold">Chunk #{previewChunkIndex + 1}</span>
+                          <span className="text-[10px] font-mono text-slate-400 px-2 py-0.5 rounded bg-slate-900">
+                            {simulatedChunks[previewChunkIndex]?.split(/\s+/).length} words
+                          </span>
+                        </div>
+                        <p className="text-slate-300 text-[11px] leading-relaxed font-sans line-clamp-4">
+                          &quot;{simulatedChunks[previewChunkIndex]}&quot;
+                        </p>
+                        {previewChunkIndex > 0 && (
+                          <div className="pt-1 border-t border-slate-900 flex items-center gap-1 text-[10px] font-mono text-sky-400">
+                            <CheckCircle2 className="w-3 h-3" />
+                            <span>Preserves {chunkOverlap}-word context window with Chunk #{previewChunkIndex}</span>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="p-6 rounded-xl bg-slate-950/60 border border-slate-800 text-center text-xs text-slate-500">
+                        Enter document content or upload a file to preview live chunking windows.
+                      </div>
                     )}
                   </div>
                 </div>
-              )}
-            </div>
 
-            {/* Right side helper info */}
-            <div className="flex flex-col gap-6">
-              <div className="glass-card rounded-2xl p-6">
-                <h3 className="font-semibold text-sm text-slate-200 mb-3 flex items-center gap-2">
-                  <Sparkles className="w-4 h-4 text-sky-400" />
-                  <span>RAG Ingestion Best Practices</span>
-                </h3>
-                <ul className="space-y-2.5 text-xs text-slate-300">
-                  <li className="flex items-start gap-2">
-                    <span className="text-sky-400 font-bold">•</span>
-                    <span>Use descriptive document titles for easy source tracking in Revbot responses.</span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="text-sky-400 font-bold">•</span>
-                    <span>Content is chunked with 50-word overlaps to maintain contextual continuity across chunk boundaries.</span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="text-sky-400 font-bold">•</span>
-                    <span>Vectors are stored as `vector(1536)` in Neon Postgres `document_chunks` table.</span>
-                  </li>
-                </ul>
+                {/* Ingested Document Catalog Card */}
+                <div className="glass-card rounded-2xl p-6 flex flex-col gap-4 border border-sky-500/20">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <FolderOpen className="w-4 h-4 text-sky-400" />
+                      <h3 className="font-semibold text-sm text-slate-100">Indexed Knowledge Catalog</h3>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={fetchCatalog}
+                      disabled={isLoadingCatalog}
+                      className="text-xs text-slate-400 hover:text-sky-300 flex items-center gap-1 transition-colors"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${isLoadingCatalog ? 'animate-spin' : ''}`} />
+                      <span>Refresh</span>
+                    </button>
+                  </div>
+
+                  <div className="space-y-2.5 max-h-[340px] overflow-y-auto pr-1">
+                    {catalogDocs.map((doc) => (
+                      <div
+                        key={doc.id}
+                        className="p-3 rounded-xl bg-slate-950/80 border border-slate-800 hover:border-slate-700 text-xs flex flex-col gap-1.5 transition-all"
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="font-semibold text-slate-200 truncate max-w-[220px]" title={doc.title}>
+                            {doc.title}
+                          </span>
+                          <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-sky-500/10 border border-sky-500/30 text-sky-400 font-semibold">
+                            {doc.chunk_count} Chunks
+                          </span>
+                        </div>
+
+                        <div className="flex items-center justify-between text-[11px] text-slate-400">
+                          <span className="truncate max-w-[180px] font-mono text-[10px]">
+                            {doc.source || `Doc #${doc.id}`}
+                          </span>
+                          
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setInspectorQueryText(doc.title);
+                                setActiveTab('inspector');
+                              }}
+                              className="text-sky-400 hover:text-sky-300 text-[11px] transition-colors"
+                              title="Inspect vectors"
+                            >
+                              Inspect
+                            </button>
+                            <span>•</span>
+                            <button
+                              type="button"
+                              disabled={deletingDocId === doc.id}
+                              onClick={() => handleDeleteDocument(doc.id)}
+                              className="text-red-400 hover:text-red-300 text-[11px] transition-colors disabled:opacity-50"
+                              title="Delete from Neon"
+                            >
+                              {deletingDocId === doc.id ? 'Deleting...' : 'Delete'}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+
+                    {catalogDocs.length === 0 && !isLoadingCatalog && (
+                      <div className="p-6 text-center text-xs text-slate-500">
+                        No indexed documents found in Neon Postgres. Ingest your first SOP above!
+                      </div>
+                    )}
+                  </div>
+                </div>
+
               </div>
             </div>
+
           </div>
         )}
+
 
         {/* TAB 3: NEON VECTOR INSPECTOR */}
         {activeTab === 'inspector' && (
