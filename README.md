@@ -85,6 +85,7 @@ flowchart TB
 ## 🔄 Core Data & Execution Flows
 
 ### 1. Vector Search & RAG Flow (Revbot Copilot)
+
 ```mermaid
 sequenceDiagram
     autonumber
@@ -108,6 +109,7 @@ sequenceDiagram
 ```
 
 ### 2. Knowledge Ingestion & Chunking Pipeline
+
 ```mermaid
 sequenceDiagram
     autonumber
@@ -129,6 +131,7 @@ sequenceDiagram
 ```
 
 ### 3. Vercel Cron Automated Pipeline
+
 ```mermaid
 sequenceDiagram
     autonumber
@@ -216,6 +219,7 @@ erDiagram
 ## 🚀 Getting Started
 
 ### 1. Environment Variables
+
 Create a `.env.local` file in the project root:
 
 ```env
@@ -226,6 +230,7 @@ CRON_SECRET=your_vercel_cron_secret
 ```
 
 ### 2. Local Development
+
 ```bash
 # Install dependencies
 npm install
@@ -239,7 +244,7 @@ node scripts/test-langgraph-endpoint.mjs
 ```
 
 ### 3. Docker Build & Run
+
 ```bash
 docker compose up -d
 ```
-
