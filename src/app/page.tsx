@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import Image from 'next/image';
 import { 
   Bot, 
   Send, 
@@ -615,15 +616,25 @@ Strategic Sovereign,$1500000,Custom Terms,CEO & Board,On-Premises / Sovereign Cl
       <header className="sticky top-0 z-50 glass-panel border-b border-sky-500/10 px-4 py-3 sm:px-8">
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-sky-500 to-orange-500 p-0.5 shadow-lg shadow-sky-500/20">
-              <div className="w-full h-full bg-[#060c18] rounded-[10px] flex items-center justify-center">
-                <BrainCircuit className="w-5 h-5 text-sky-400" />
+            <div className="relative group flex-shrink-0">
+              <div className="w-11 h-11 rounded-full p-[1.5px] bg-gradient-to-tr from-slate-600 via-slate-300 to-red-600 shadow-lg shadow-red-950/40 flex items-center justify-center">
+                <div className="w-full h-full rounded-full overflow-hidden bg-[#060c18] flex items-center justify-center">
+                  <Image
+                    src="/rds-master-logo.png"
+                    alt="Rise Defense Systems Master Logo"
+                    width={44}
+                    height={44}
+                    className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110"
+                    priority
+                  />
+                </div>
               </div>
+              <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-emerald-500 border-2 border-[#060c18]" title="Master Defense System Active"></span>
             </div>
             <div>
               <div className="flex items-center gap-2">
                 <span className="font-bold text-lg tracking-tight gradient-text">Rise Defense Systems</span>
-                <span className="text-xs px-2 py-0.5 rounded-full bg-orange-500/10 border border-orange-500/30 text-orange-400 font-semibold">
+                <span className="text-xs px-2 py-0.5 rounded-full bg-red-500/10 border border-red-500/30 text-red-400 font-semibold">
                   RDS RevOps
                 </span>
               </div>
@@ -760,14 +771,23 @@ Strategic Sovereign,$1500000,Custom Terms,CEO & Board,On-Premises / Sovereign Cl
               {/* Chat Header */}
               <div className="px-6 py-4 border-b border-slate-800 bg-slate-950/60 flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <div className="relative">
-                    <div className="w-8 h-8 rounded-lg bg-sky-500/20 border border-sky-500/40 flex items-center justify-center">
-                      <Bot className="w-4 h-4 text-sky-400" />
+                  <div className="relative flex-shrink-0">
+                    <div className="w-9 h-9 rounded-full bg-slate-900 border border-slate-700/80 p-0.5 shadow-md flex items-center justify-center overflow-hidden">
+                      <Image
+                        src="/rds-master-logo.png"
+                        alt="Revbot Copilot Logo"
+                        width={36}
+                        height={36}
+                        className="rounded-full object-cover"
+                      />
                     </div>
                     <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-500 border-2 border-[#060c18]"></span>
                   </div>
                   <div>
-                    <h2 className="font-semibold text-sm text-slate-100">Revbot Intelligent Assistant</h2>
+                    <h2 className="font-semibold text-sm text-slate-100 flex items-center gap-2">
+                      <span>Revbot Intelligent Assistant</span>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-500/10 text-red-400 font-mono border border-red-500/30">Master RDS Copilot</span>
+                    </h2>
                     <p className="text-xs text-slate-400">Retrieval-Augmented Generation via Neon Postgres</p>
                   </div>
                 </div>
@@ -2208,9 +2228,16 @@ Strategic Sovereign,$1500000,Custom Terms,CEO & Board,On-Premises / Sovereign Cl
 
       {/* Bottom Footer */}
       <footer className="border-t border-slate-800/80 py-4 px-6 text-center text-xs text-slate-500 bg-slate-950/60">
-        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
-          <div>
-            © {new Date().getFullYear()} Rise Defense Systems (RDS). All rights reserved.
+        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <Image
+              src="/rds-master-logo.png"
+              alt="Rise Defense Systems Master Logo"
+              width={22}
+              height={22}
+              className="rounded-full opacity-90 hover:opacity-100 transition-opacity"
+            />
+            <span>© {new Date().getFullYear()} Rise Defense Systems (RDS). All rights reserved.</span>
           </div>
           <div className="flex items-center gap-4 text-slate-400">
             <span className="hover:text-slate-200 cursor-pointer">Privacy Policy</span>

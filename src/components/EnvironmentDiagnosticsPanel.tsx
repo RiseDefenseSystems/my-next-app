@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import Image from 'next/image';
 import { 
   Activity, 
   Server, 
@@ -86,18 +87,30 @@ export default function EnvironmentDiagnosticsPanel({
 
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 relative z-10">
           <div className="flex items-start gap-4">
-            <div className={`p-3.5 rounded-2xl border ${
-              isHealthy 
-                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' 
-                : 'bg-amber-500/10 border-amber-500/30 text-amber-400'
-            }`}>
-              <Activity className={`w-7 h-7 ${isLoading ? 'animate-spin' : ''}`} />
+            <div className="relative flex-shrink-0">
+              <div className="w-14 h-14 rounded-2xl p-[1.5px] bg-gradient-to-tr from-slate-600 via-slate-300 to-red-600 shadow-xl shadow-red-950/40 flex items-center justify-center">
+                <div className="w-full h-full rounded-[14px] overflow-hidden bg-[#060c18] flex items-center justify-center">
+                  <Image
+                    src="/rds-master-logo.png"
+                    alt="Rise Defense Systems Master Logo"
+                    width={56}
+                    height={56}
+                    className="w-full h-full object-cover"
+                  />
+                </div>
+              </div>
+              <span className={`absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-[#060c18] flex items-center justify-center ${
+                isHealthy ? 'bg-emerald-500' : 'bg-amber-500'
+              }`}>
+                <span className={`w-2 h-2 rounded-full bg-white ${isLoading ? 'animate-ping' : ''}`}></span>
+              </span>
             </div>
 
             <div>
               <div className="flex items-center gap-3">
-                <h2 className="text-xl font-bold text-slate-100">
-                  RDS Environment Diagnostic Engine
+                <h2 className="text-xl font-bold text-slate-100 flex items-center gap-2">
+                  <Activity className="w-5 h-5 text-sky-400" />
+                  <span>RDS Environment Diagnostic Engine</span>
                 </h2>
                 <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold flex items-center gap-1.5 border ${
                   isHealthy 
