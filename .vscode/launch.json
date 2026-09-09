@@ -3,6 +3,14 @@
         {
             "type": "node",
             "request": "launch",
+            "name": "Run jsesc",
+            "runtimeExecutable": "jsesc",
+            "cwd": "${workspaceFolder}/node_modules/@babel/generator",
+            "args": []
+        },
+        {
+            "type": "node",
+            "request": "launch",
             "name": "Run eslint",
             "runtimeExecutable": "eslint",
             "cwd": "${workspaceFolder}",
