@@ -41,6 +41,8 @@ import {
 } from 'lucide-react';
 import type { DocumentChunkMatch, DocumentSummary } from '@/lib/rag';
 import { RDS_RTL_AUDIO_TRACKS, type AudioTrack } from '@/lib/audio';
+import EnvironmentDiagnosticsPanel from '@/components/EnvironmentDiagnosticsPanel';
+import type { EnvironmentDiagnosticReport } from '@/lib/diagnostic';
 
 interface ChatMessage {
   id: string;
@@ -51,7 +53,29 @@ interface ChatMessage {
 }
 
 export default function RevbotUI() {
-  const [activeTab, setActiveTab] = useState<'chat' | 'ingest' | 'inspector' | 'audio'>('chat');
+  const [activeTab, setActiveTab] = useState<'chat' | 'ingest' | 'inspector' | 'audio' | 'diagnostics'>('chat');
+  
+  // Environment Diagnostics State
+  const [diagnosticReport, setDiagnosticReport] = useState<EnvironmentDiagnosticReport | null>(null);
+  const [isDiagnosing, setIsDiagnosing] = useState(false);
+
+  const runDiagnosticSequence = useCallback(async () => {
+    setIsDiagnosing(true);
+    try {
+      const res = await fetch('/api/diagnostic/environment', { method: 'POST' });
+      if (!res.ok) throw new Error(`HTTP error ${res.status}`);
+      const data: EnvironmentDiagnosticReport = await res.json();
+      setDiagnosticReport(data);
+    } catch (err) {
+      console.error('Failed to run environment diagnostic:', err);
+    } finally {
+      setIsDiagnosing(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    runDiagnosticSequence();
+  }, [runDiagnosticSequence]);
   
   // RTL Audio Tool State
   const [selectedTrack, setSelectedTrack] = useState<AudioTrack>(RDS_RTL_AUDIO_TRACKS[0]);
@@ -605,6 +629,18 @@ Strategic Sovereign,$1500000,Custom Terms,CEO & Board,On-Premises / Sovereign Cl
               <Zap className="w-3.5 h-3.5 text-sky-400" />
               <span>1536-D HNSW</span>
             </div>
+            <button 
+              onClick={() => {
+                setActiveTab('diagnostics');
+                runDiagnosticSequence();
+              }}
+              disabled={isDiagnosing}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-gradient-to-r from-emerald-500/15 via-sky-500/15 to-transparent hover:from-emerald-500/25 hover:to-sky-500/25 border border-emerald-500/40 text-emerald-300 transition-all shadow-sm group cursor-pointer"
+              title="Initiate Revbot Environment Diagnostic Sequence"
+            >
+              <Activity className={`w-3.5 h-3.5 text-emerald-400 group-hover:rotate-180 transition-transform ${isDiagnosing ? 'animate-spin' : ''}`} />
+              <span className="font-semibold text-slate-100">{isDiagnosing ? 'Auditing...' : 'Check Environment'}</span>
+            </button>
             <a 
               href="https://rdsrevops.com" 
               target="_blank" 
@@ -672,6 +708,23 @@ Strategic Sovereign,$1500000,Custom Terms,CEO & Board,On-Premises / Sovereign Cl
             >
               <Database className="w-4 h-4" />
               <span>Neon Vector Inspector</span>
+            </button>
+
+            <button
+              onClick={() => {
+                setActiveTab('diagnostics');
+                if (!diagnosticReport) {
+                  runDiagnosticSequence();
+                }
+              }}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-medium text-sm transition-all cursor-pointer ${
+                activeTab === 'diagnostics'
+                  ? 'bg-gradient-to-r from-emerald-500/20 to-sky-500/20 text-emerald-300 border border-emerald-500/40 shadow-lg shadow-emerald-500/10'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/50'
+              }`}
+            >
+              <Activity className="w-4 h-4 text-emerald-400" />
+              <span>Environment Diagnostics</span>
             </button>
           </div>
 
@@ -2125,6 +2178,15 @@ Strategic Sovereign,$1500000,Custom Terms,CEO & Board,On-Premises / Sovereign Cl
               </div>
             </div>
           </div>
+        )}
+
+        {/* TAB 5: RDS ENVIRONMENT DIAGNOSTICS */}
+        {activeTab === 'diagnostics' && (
+          <EnvironmentDiagnosticsPanel 
+            report={diagnosticReport} 
+            isLoading={isDiagnosing} 
+            onRefresh={runDiagnosticSequence} 
+          />
         )}
       </main>
 
