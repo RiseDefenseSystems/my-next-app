@@ -74,8 +74,24 @@ export default function RevbotUI() {
   }, []);
 
   useEffect(() => {
-    runDiagnosticSequence();
-  }, [runDiagnosticSequence]);
+    let ignore = false;
+    const fetchDiag = async () => {
+      try {
+        const res = await fetch('/api/diagnostic/environment', { method: 'POST' });
+        if (!res.ok) throw new Error(`HTTP error ${res.status}`);
+        const data: EnvironmentDiagnosticReport = await res.json();
+        if (!ignore) {
+          setDiagnosticReport(data);
+        }
+      } catch (err) {
+        console.error('Failed to run environment diagnostic:', err);
+      }
+    };
+    fetchDiag();
+    return () => {
+      ignore = true;
+    };
+  }, []);
   
   // RTL Audio Tool State
   const [selectedTrack, setSelectedTrack] = useState<AudioTrack>(RDS_RTL_AUDIO_TRACKS[0]);

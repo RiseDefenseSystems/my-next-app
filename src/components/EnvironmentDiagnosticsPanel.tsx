@@ -8,22 +8,15 @@ import {
   Cpu, 
   GitBranch, 
   CheckCircle2, 
-  AlertTriangle, 
   RefreshCw, 
   Copy, 
   Check, 
   ExternalLink, 
   ShieldCheck, 
-  Layers, 
   Zap, 
   FileText, 
-  Radio,
   HardDrive,
-  Trash2,
-  Sparkles,
-  ArrowDownCircle,
-  FolderArchive,
-  Terminal
+  Trash2
 } from 'lucide-react';
 import type { EnvironmentDiagnosticReport } from '@/lib/diagnostic';
 import type { StoragePurgeReport, DiskTelemetry } from '@/lib/storagePurge';
